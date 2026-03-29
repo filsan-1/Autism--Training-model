@@ -2,72 +2,54 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 
-class ImageClassifierCNN:
-    def __init__(self, input_shape, num_classes):
-        self.model = self.build_model(input_shape, num_classes)
 
-    def build_model(self, input_shape, num_classes):
-        model = keras.Sequential([
-            layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_shape),
-            layers.MaxPooling2D((2, 2)),
-            layers.Conv2D(64, (3, 3), activation='relu'),
-            layers.MaxPooling2D((2, 2)),
-            layers.Conv2D(128, (3, 3), activation='relu'),
-            layers.MaxPooling2D((2, 2)),
-            layers.Conv2D(256, (3, 3), activation='relu'),
-            layers.MaxPooling2D((2, 2)),
-            layers.Flatten(),
-            layers.Dense(128, activation='relu'),
-            layers.Dense(num_classes, activation='softmax')
-        ])
-        return model
+def focal_loss(gamma=2., alpha=0.25):
+    def focal_loss_fixed(y_true, y_pred):
+        # Clip predictions to prevent log(0)
+        y_pred = tf.clip_by_value(y_pred, keras.backend.epsilon(), 1 - keras.backend.epsilon())
+        # Calculate cross entropy
+        cross_entropy = -y_true * tf.math.log(y_pred)
+        # Apply focal loss formula
+        return tf.reduce_mean(alpha * tf.pow(1 - y_pred, gamma) * cross_entropy)
+    return focal_loss_fixed
 
-    def compile_model(self, learning_rate=0.001):
-        self.model.compile(optimizer=keras.optimizers.Adam(learning_rate),
-                           loss='sparse_categorical_crossentropy',
-                           metrics=['accuracy'])
 
-    def train(self, train_data, validation_data, class_weight=None):
-        early_stopping = keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True)
-        reduce_lr = keras.callbacks.ReduceLROnPlateau(patience=3)
-        model_checkpoint = keras.callbacks.ModelCheckpoint('best_model.h5', save_best_only=True)
+def weighted_class_loss(weights):
+    def loss(y_true, y_pred):
+        # Calculate class weights loss
+        y_pred = tf.clip_by_value(y_pred, keras.backend.epsilon(), 1 - keras.backend.epsilon())
+        return -tf.reduce_mean(weights * y_true * tf.math.log(y_pred))
+    return loss
 
-        history = self.model.fit(train_data,
-                                  validation_data=validation_data,
-                                  epochs=50,
-                                  class_weight=class_weight,
-                                  callbacks=[early_stopping, reduce_lr, model_checkpoint])
-        return history
 
-    def evaluate(self, test_data):
-        return self.model.evaluate(test_data)
+def create_model():
+    model = keras.Sequential([
+        layers.Conv2D(32, (3, 3), activation='relu', input_shape=(image_height, image_width, 3)),
+        layers.MaxPooling2D(),
+        layers.Conv2D(64, (3, 3), activation='relu'),
+        layers.MaxPooling2D(),
+        layers.Flatten(),
+        layers.Dense(128, activation='relu'),
+        layers.Dense(1, activation='sigmoid'),
+    ])
+    return model
 
-# Add data augmentation
+
+# Data Augmentation
 train_datagen = keras.preprocessing.image.ImageDataGenerator(
-    rescale=1./255,
-    rotation_range=20,
+    rotation_range=40,
     width_shift_range=0.2,
     height_shift_range=0.2,
     shear_range=0.2,
     zoom_range=0.2,
     horizontal_flip=True,
     fill_mode='nearest')
- 
-# Update other parts of the training script accordingly.
 
-# Evaluation utility module
-import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.metrics import roc_curve, precision_recall_curve
+# Compile model with optimized loss
+model = create_model()
+model.compile(optimizer='adam', 
+              loss=focal_loss(gamma=2.0, alpha=0.25),
+              metrics=['accuracy']) 
 
-def plot_roc_curve(y_true, y_scores):
-    fpr, tpr, _ = roc_curve(y_true, y_scores)
-    plt.plot(fpr, tpr, color='blue', label='ROC curve')
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title('Receiver Operating Characteristic')
-    plt.legend(loc='best')
-    plt.show()
-
-
-# Similarly, functions for precision-recall curves and other metrics can be added.
+# Training the model
+model.fit(train_data, train_labels, epochs=50, class_weight={0:1, 1:2}, callbacks=[...])  # Add necessary callbacks
